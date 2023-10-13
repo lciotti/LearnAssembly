@@ -1,0 +1,197 @@
+;-----------------------------------------------------------------------------
+;                                 EAT.ASM
+;                     Backhanded advertising program
+;
+;                                           by Louis Ciotti
+;                                           TASM
+;                                           Last Update 4/27/2021
+;-----------------------------------------------------------------------------
+
+;--------------------------------|
+;    BEGIN STACK SEGMENT         |
+;--------------------------------|
+MyStack    SEGMENT Stack            ; STACK word ensures loading of SS by DOS
+
+           DB   64 DUP ('STACK!!!') ; This reserves 512 bytes for the stack
+
+MyStack    ENDS
+;--------------------------------|
+;     END STACK SEGMENT          |
+;--------------------------------|
+
+;--------------------------------|
+;     BEGIN DATA SEGMENT         |
+;--------------------------------|
+MyData     SEGMENT
+; 18H = 24D; 4F = 79D; Combined 0-based X,Y of 80x25 screen LR corner:
+LRXY       DW      184FH
+
+TextPos    DW      ?
+Eat1       DB      "Eat at Joes's...",'$'
+Eat2       DB      "...ten million files can't ALL be wrong!",'$'
+CRLF       DB      0DH,0AH,'$'
+
+MyData     ENDS
+;--------------------------------|
+;     END DATA SEGMENT           |
+;--------------------------------|
+
+;--------------------------------|
+;     BEGIN CODE SEGMENT         |
+;--------------------------------|
+MyProg    SEGMENT
+
+          assume CS:MyProg,DS:MyData
+Main      PROC
+
+Start:    ; This is where program execution begins:
+
+          mov  AX,MyData   ; Set up our own data segment address in DS
+          mov  DS,AX       ; Can't load segment reg. directly from memory
+
+          call ClrScr      ; Clear the full screen
+
+          mov  TextPos, 0914H     ; 0914H = X @ 20 Y @9
+
+          mov  DX,TextPos  ; TextPos contains the X,Y values
+          call GotoXY      ; Position the Cursor
+          lea  DX,Eat1     ; Load offset of Eat1 message strin into DX
+          call Writeln     ;   and display it
+
+          mov  DX,TextPos  ; Reuse the TextPos variable
+          mov  DH, 10      ; Put new value of Y postion into DH
+          call GotoXY      ; Postion the cursor
+          lea  DX,Eat2     ; Load offset of CRLF string into DX
+          call Writeln     ;   and display it
+
+          mov  AH,4CH      ; Terminate process DOS service
+          mov  AL,0        ; Pass this value back to ERRORLEVEL
+          int  21H         ; Control  returns to DOS
+
+;-----------------------------|
+;      PROCEDURE SECTION      |
+;-----------------------------|
+
+;----------------------------------------------------------------------------|
+;   GotoXY     --  Postion the hardware cursor to X,Y                        |
+;   Last update: 05/01/21                                                    |
+;                                                                            |
+;   1 Entry point:                                                           |
+;                                                                            |
+;   GotoXY:                                                                  |
+;      Caller must pass:                                                     |
+;       DL: X Value        These are both 0 based:  i.e. they                |
+;       DH: Y Value          assume a screen 24 x 79 not 25 x 80             |
+;      Action:  Moves the hardware cursor to the X,Y postion                 |
+;               loaded into DL and DH                                        |
+;----------------------------------------------------------------------------|
+GotoXY    PROC
+          mov  AH,02H      ; Select VIDEO service 2: Position Cursor
+          mov  BH,0        ; Stay with display page 0
+          int  10H         ; Call VIDEO
+          ret              ; Return to caller
+GotoXY    ENDP
+
+;----------------------------------------------------------------------------|
+;   CLRSCR     --  Cleas or Scrolls screens or windows                       |
+;   Last update: 05/01/21                                                    |
+;                                                                            |
+;   4 Entry Points:                                                          |
+;                                                                            |
+;   ClrScr:                                                                  |
+;      No values expected from caller                                        |
+;      Action: Clears the entire screen to blanks with 07H as                |
+;              the display attribute                                         |
+;                                                                            |
+;   ClrWin:                                                                  |
+;      Caller must pass:                                                     |
+;                                                                            |
+;      Action: Clears the window specified by the caller to                  |
+;              blanks with 07H as the display attribut                       |
+;                                                                            |
+;   ScrlWin:                                                                 |
+;      Caller must pass:                                                     |
+;          Scrolls the window specified by the caller by                     |
+;              the number of lines passed in AL. The blank                   |
+;              lines inserted at screen bottom are cleared                   |
+;              blanks with 07H as the display attribute                      |
+;                                                                            |
+;   VIDEO6:                                                                  |
+;      Caller must pass:                                                     |
+;         CH: Y coordinate. upper-left corner of window                      |
+;         CL: X coordinate. upper-left corner of window                      |
+;         DH: Y coordinate. lower-right corner of window                     |
+;         DL: X coordinate. lower-right corner of window                     |
+;         AL: number of lines to scroll window by (0 clears it)              |
+;         BH: display attribute for blanked lines (07H is "normal")          |
+;      Action: Generic access to BIOS VIDEO service 6.  Caller               |
+;              must pass ALL register parameters as shown above              |
+;----------------------------------------------------------------------------|
+ClrScr    PROC
+          mov  CX,0        ; Upper-left corner of screen (0,0)
+          mov  DX,LRXY     ; Lower-right X,Y coordinates of screen into DX
+ClrWin:   mov  AL,0        ; 0 specifies clear entire region
+ScrlWin:  mov  BH,07H      ; Specify "normal" attribute for blanked line(s)
+VIDEO6:   mov  AH,06H      ; Select VIDEO service 6: Initialize/Scroll
+          int  10H         ; call VIDEO
+          ret              ; return to caller
+clrScr    ENDP
+
+;----------------------------------------------------------------------------|
+;   WRITE     -- Displays indoemation to the screen via DOS                  |
+;                service 9: Print String                                     |
+;   Last update: 05/01/21                                                    |
+;                                                                            |
+;   1 entry point:                                                           |
+;                                                                            |
+;   Write:                                                                   |
+;      Caller must pass:                                                     |
+;         DS: The segment of the string to be displayed                      |
+;         DX: The offset of the string to be diaplayed                       |
+;             String must be terminated by "$"                               |
+;      Action: Displays the string at DS:DX up to the "$" marker             |
+;----------------------------------------------------------------------------|
+Write     PROC
+          mov  AH,09H      ; Select DOS service 09H: Print String
+          int  21H         ; Call DOS
+          ret              ; Return to the caller
+Write     ENDP
+
+;----------------------------------------------------------------------------|
+;   WRITELN     -- Displays information to the screen via DOS                |
+;                  service 9 and issues a newline                            |
+;   Last update: 05/01/21                                                    |
+;                                                                            |
+;   1 enty point                                                             |
+;                                                                            |
+;   Writeln:                                                                 |
+;      Caller must pass:                                                     |
+;         DS: The segment of the string to be displayed                      |
+;         DX: The offset of the string to be displayed                       |
+;             The string must be terminated by "$"                           |
+;         Action:  Displays the string at DS:DX up to the "$" marker         |
+;                  then issues a newline.  Harware cursor will               |
+;                  move the the left margin of the following line.           |
+;                  If the display is to the bottom of the screen line,       |
+;                  the screen will scroll.                                   |
+;     Calls: Write                                                           |
+;----------------------------------------------------------------------------|
+Writeln   PROC
+          call Write          ; Display the strin proper through Write
+          mov DX,OFFSET CRLF  ; Load address of newline string into DS:DX
+          call Write          ; Display newline string through Write
+          ret                 ; Return to the Caller
+Writeln   ENDP
+
+;-----------------------------|
+;      END PROCEDURE SECTION  |
+;-----------------------------|
+
+Main      ENDP
+
+MyProg    ENDS
+
+;---------------------------|
+;     END CODE SEGMENT      |
+;---------------------------|
+          END Start      ; The procedure named Start becomes the main proram
